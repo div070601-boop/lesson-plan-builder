@@ -1,0 +1,150 @@
+"""
+Admin Router — System administration endpoints.
+For indexer control, re-analysis triggers, provider diagnostics, and system stats.
+"""
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
+
+from services.providers import provider_service, ProviderError
+from services.onedrive import onedrive_service, local_library
+from services.generation import _generations
+from config import settings
+
+router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+@router.get("/auth/onedrive/login")
+async def onedrive_login(request: Request):
+    """Initiate Microsoft Graph OAuth flow."""
+    redirect_uri = str(request.base_url) + "api/admin/auth/onedrive/callback"
+    # Ensure scheme is http if running locally
+    if redirect_uri.startswith("http://127.0.0.1"):
+        redirect_uri = redirect_uri.replace("127.0.0.1", "localhost")
+    try:
+        auth_url = onedrive_service.get_auth_url(redirect_uri)
+        return {"auth_url": auth_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/auth/onedrive/callback")
+async def onedrive_callback(request: Request):
+    """Handle Microsoft Graph OAuth redirect."""
+    redirect_uri = str(request.base_url) + "api/admin/auth/onedrive/callback"
+    if redirect_uri.startswith("http://127.0.0.1"):
+        redirect_uri = redirect_uri.replace("127.0.0.1", "localhost")
+        
+    query_params = dict(request.query_params)
+    try:
+        onedrive_service.acquire_token_by_auth_code(query_params, redirect_uri)
+        # Redirect back to frontend admin panel
+        return RedirectResponse(url=f"{settings.frontend_url}/admin?onedrive=connected")
+    except Exception as e:
+        return RedirectResponse(url=f"{settings.frontend_url}/admin?onedrive=error&msg={str(e)}")
+
+
+
+class TestProviderRequest(BaseModel):
+    prompt: str = "Respond with: Hello from Lesson Plan Builder!"
+
+
+@router.post("/reindex")
+async def trigger_reindex():
+    """Trigger a re-index. Uses Graph API if configured, otherwise scans local library/ folder."""
+    # Check if OneDrive Graph API is configured
+    if onedrive_service.is_configured and settings.onedrive_share_urls:
+        try:
+            all_files = []
+            for share_url in settings.onedrive_share_urls:
+                files = await onedrive_service.crawl_shared_folder(
+                    share_url, extensions=[".pptx", ".ppt", ".docx"]
+                )
+                all_files.extend(files)
+
+            # Download files to local library
+            downloaded = 0
+            for f in all_files:
+                if f.item_id and f.download_url:
+                    save_path = f"./library/{f.name}"
+                    await onedrive_service.download_file(
+                        settings.onedrive_share_urls[0], f.item_id, save_path
+                    )
+                    downloaded += 1
+
+            return {
+                "status": "ok",
+                "source": "onedrive",
+                "files_found": len(all_files),
+                "files_downloaded": downloaded,
+                "files": [f.to_dict() for f in all_files],
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"OneDrive crawl failed: {str(e)}")
+    else:
+        # Scan local library/ folder
+        local_files = local_library.list_all_files()
+        return {
+            "status": "ok",
+            "source": "local",
+            "message": "Scanned local library/ folder. To enable OneDrive sync, add MS_GRAPH_CLIENT_ID and MS_GRAPH_CLIENT_SECRET to .env",
+            "files_found": len(local_files),
+            "files": [f.to_dict() for f in local_files],
+        }
+
+
+@router.post("/reanalyze/{deck_id}")
+async def trigger_reanalysis(deck_id: str):
+    """Trigger re-analysis of a specific deck."""
+    return {"status": "not_configured", "message": "AI analysis not yet configured"}
+
+
+@router.post("/reanalyze-all")
+async def trigger_full_reanalysis():
+    """Trigger re-analysis of the full library."""
+    return {"status": "not_configured", "message": "AI analysis not yet configured"}
+
+
+@router.get("/stats")
+async def get_stats():
+    """Get system statistics: indexed decks, generations, provider usage."""
+    lib_status = local_library.get_status()
+    return {
+        "total_decks": lib_status["total_files"],
+        "total_generations": len(_generations),
+        "total_users": 0,
+        "indexer_status": "onedrive" if onedrive_service.is_configured else "local",
+        "library": lib_status,
+        "last_index_run": None,
+    }
+
+
+@router.get("/provider-status")
+async def get_provider_status():
+    """Get the configuration status of each AI provider."""
+    status = provider_service.get_status()
+    status["onedrive"] = "configured" if onedrive_service.is_configured else "unconfigured"
+    return status
+
+
+@router.get("/library-status")
+async def get_library_status():
+    """Get detailed status of the deck library."""
+    return {
+        "onedrive_configured": onedrive_service.is_configured,
+        "share_urls": len(settings.onedrive_share_urls),
+        "local_library": local_library.get_status(),
+    }
+
+
+@router.post("/test-provider")
+async def test_provider(request: TestProviderRequest):
+    """Send a test prompt to the first available AI provider."""
+    try:
+        response, model = await provider_service.complete(
+            prompt=request.prompt,
+            system="You are a helpful test assistant. Respond briefly.",
+            task_type="analysis",
+        )
+        return {"status": "ok", "model": model, "response": response.strip()[:500]}
+    except ProviderError as e:
+        raise HTTPException(status_code=503, detail=str(e))

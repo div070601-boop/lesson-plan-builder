@@ -1,0 +1,120 @@
+.page { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-6); }
+.header { display: flex; justify-content: space-between; align-items: flex-start; }
+
+.deckGrid { display: flex; flex-direction: column; gap: var(--space-4); }
+
+.deckCard {
+  animation: fade-in 0.3s ease-out forwards;
+  opacity: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.deckCard:hover {
+  transform: translateY(-1px);
+}
+
+.deckCard.expanded {
+  border-color: rgba(124, 92, 252, 0.2);
+  box-shadow: var(--shadow-glow);
+}
+
+.searchBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  transition: border-color var(--transition-base);
+}
+
+.searchBar:focus-within {
+  border-color: var(--accent-primary);
+}
+
+.searchInput {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.deckHeader { display: flex; gap: var(--space-4); align-items: flex-start; }
+
+.deckIcon {
+  width: 48px; height: 48px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(124, 92, 252, 0.08);
+  border-radius: var(--radius-lg);
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.deckMeta { flex: 1; min-width: 0; }
+
+.deckTitle {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.deckSubMeta {
+  display: flex; gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.deckSummary {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.deckAnalysis {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.analysisPill {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+}
+
+.pillLabel {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pillValue {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.deckTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

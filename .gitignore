@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.production
+
+# Build outputs
+.next/
+out/
+dist/
+build/
+outputs/
+temp_uploads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# OAuth / tokens
+flow.json
+.onedrive_token.json
+
+# Python
+*.egg-info/
+*.egg
+pip-log.txt
+
+# Next.js
+next-env.d.ts
