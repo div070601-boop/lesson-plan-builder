@@ -91,8 +91,15 @@ class OneDriveService:
         # Fallback: check local file
         return os.path.exists(".onedrive_token.json")
 
-    def _get_msal_app(self, cache=None) -> "msal.PublicClientApplication":
+    def _get_msal_app(self, cache=None):
         import msal
+        if self.client_secret:
+            return msal.ConfidentialClientApplication(
+                self.client_id,
+                client_credential=self.client_secret,
+                authority="https://login.microsoftonline.com/common",
+                token_cache=cache
+            )
         return msal.PublicClientApplication(
             self.client_id, 
             authority="https://login.microsoftonline.com/common",
@@ -146,11 +153,7 @@ class OneDriveService:
 
     def get_auth_url(self, redirect_uri: str) -> str:
         """Get the Microsoft login URL for OAuth web flow."""
-        import msal
-        app = msal.PublicClientApplication(
-            self.client_id,
-            authority="https://login.microsoftonline.com/common",
-        )
+        app = self._get_msal_app()
         flow = app.initiate_auth_code_flow(
             scopes=["Files.Read.All", "Sites.Read.All"],
             redirect_uri=redirect_uri
@@ -176,12 +179,8 @@ class OneDriveService:
         # Create a token cache so MSAL writes the tokens into it
         cache = msal.SerializableTokenCache()
 
-        # MUST use the same app (same client_id + authority) and pass the cache
-        app = msal.PublicClientApplication(
-            self.client_id,
-            authority="https://login.microsoftonline.com/common",
-            token_cache=cache
-        )
+        # MUST use the same app (same client_id + authority + secret) and pass the cache
+        app = self._get_msal_app(cache=cache)
 
         result = app.acquire_token_by_auth_code_flow(flow, query_params)
 
