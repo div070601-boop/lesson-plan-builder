@@ -79,7 +79,15 @@ async def trigger_reindex():
                 "files": [f.to_dict() for f in all_files],
             }
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"OneDrive crawl failed: {str(e)}")
+            # Graceful fallback: return local files with a warning message so UI doesn't break
+            local_files = local_library.list_all_files()
+            return {
+                "status": "ok",
+                "source": "local_fallback",
+                "message": f"Indexed local library ({len(local_files)} files). Note: OneDrive crawl encountered: {str(e)}",
+                "files_found": len(local_files),
+                "files": [f.to_dict() for f in local_files],
+            }
     else:
         # Scan local library/ folder
         local_files = local_library.list_all_files()

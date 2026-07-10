@@ -221,7 +221,7 @@ class OneDriveService:
         token = await self._get_access_token()
         share_token = _encode_share_url(share_url)
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             response = await client.get(
                 f"{self.GRAPH_BASE}/shares/{share_token}/driveItem/children",
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
@@ -251,7 +251,7 @@ class OneDriveService:
         token = await self._get_access_token()
         share_token = _encode_share_url(share_url)
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             response = await client.get(
                 f"{self.GRAPH_BASE}/shares/{share_token}/items/{item_id}/children",
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
@@ -281,7 +281,7 @@ class OneDriveService:
         token = await self._get_access_token()
         share_token = _encode_share_url(share_url)
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             # Get the download URL
             response = await client.get(
                 f"{self.GRAPH_BASE}/shares/{share_token}/items/{item_id}",
