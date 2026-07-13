@@ -12,11 +12,14 @@ import base64
 import os
 import json
 import asyncio
+import logging
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class OneDriveItem:
