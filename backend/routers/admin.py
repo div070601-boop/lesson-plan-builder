@@ -149,6 +149,40 @@ async def debug_onedrive():
                 result["list_shared_folder_ok"] = True
                 result["items_found"] = len(items)
                 result["items"] = [i.to_dict() for i in items[:10]]  # First 10 items
+
+                if items and items[0].item_id:
+                    import httpx
+                    from services.onedrive import _encode_share_url
+                    share_token = _encode_share_url(settings.onedrive_share_urls[0])
+                    item_id = items[0].item_id
+                    drive_id = item_id.split("!")[0]
+                    async with httpx.AsyncClient(follow_redirects=True) as client:
+                        # Test Option A: shares/.../driveItem/items/.../children
+                        try:
+                            rA = await client.get(
+                                f"https://graph.microsoft.com/v1.0/shares/{share_token}/driveItem/items/{item_id}/children",
+                                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                                timeout=15
+                            )
+                            result["subfolder_test_A_status"] = rA.status_code
+                            if rA.status_code == 200:
+                                result["subfolder_test_A_count"] = len(rA.json().get("value", []))
+                        except Exception as e:
+                            result["subfolder_test_A_error"] = str(e)
+
+                        # Test Option B: drives/.../items/.../children
+                        try:
+                            rB = await client.get(
+                                f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/children",
+                                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                                timeout=15
+                            )
+                            result["subfolder_test_B_status"] = rB.status_code
+                            if rB.status_code == 200:
+                                result["subfolder_test_B_count"] = len(rB.json().get("value", []))
+                        except Exception as e:
+                            result["subfolder_test_B_error"] = str(e)
+
             except Exception as e:
                 result["list_shared_folder_ok"] = False
                 result["list_error"] = f"{type(e).__name__}: {str(e)}"
