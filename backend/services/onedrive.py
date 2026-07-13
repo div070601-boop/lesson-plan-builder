@@ -183,9 +183,19 @@ class OneDriveService:
             scopes=["Files.Read.All", "Sites.Read.All"],
             redirect_uri=redirect_uri
         )
-        # Persist flow to file so it survives server restarts
+        # Persist flow to file and Supabase so it survives server/container restarts
         with open("flow.json", "w") as f:
             json.dump(flow, f)
+        from services.database import supabase
+        if supabase:
+            try:
+                supabase.table("settings").upsert({
+                    "key": "onedrive_auth_flow",
+                    "value": json.dumps(flow)
+                }).execute()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Could not save auth flow to Supabase: {e}")
         return flow["auth_uri"]
 
     def acquire_token_by_auth_code(self, query_params: dict, redirect_uri: str) -> dict:
@@ -194,12 +204,25 @@ class OneDriveService:
         import logging
         logger = logging.getLogger(__name__)
 
-        # Load the flow from file
+        # Load the flow from file or Supabase
+        flow = None
         flow_path = Path("flow.json")
-        if not flow_path.exists():
-            raise ValueError("Auth flow not found. Please initiate login first.")
-        with open(flow_path, "r") as f:
-            flow = json.load(f)
+        if flow_path.exists():
+            with open(flow_path, "r") as f:
+                flow = json.load(f)
+        
+        if not flow:
+            from services.database import supabase
+            if supabase:
+                try:
+                    res = supabase.table("settings").select("value").eq("key", "onedrive_auth_flow").execute()
+                    if res.data and res.data[0].get("value"):
+                        flow = json.loads(res.data[0]["value"])
+                except Exception as e:
+                    logger.warning(f"Could not load auth flow from Supabase: {e}")
+
+        if not flow:
+            raise ValueError("Auth flow not found in file or Supabase. Please click 'Connect OneDrive' again.")
 
         # Create a token cache so MSAL writes the tokens into it
         cache = msal.SerializableTokenCache()
@@ -233,8 +256,13 @@ class OneDriveService:
             with open(".onedrive_token.json", "w") as f:
                 f.write(cache.serialize())
 
-        # Clean up flow file
+        # Clean up flow file and Supabase entry
         flow_path.unlink(missing_ok=True)
+        if supabase:
+            try:
+                supabase.table("settings").delete().eq("key", "onedrive_auth_flow").execute()
+            except Exception:
+                pass
 
         return result
 

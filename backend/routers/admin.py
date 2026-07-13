@@ -157,6 +157,17 @@ async def debug_onedrive():
     return result
 
 
+@router.post("/restart")
+async def restart_server():
+    """Restart the server process (causes Render or Docker container to reboot cleanly)."""
+    import os, threading, time
+    def _do_restart():
+        time.sleep(1)
+        os._exit(0)
+    threading.Thread(target=_do_restart, daemon=True).start()
+    return {"status": "ok", "message": "Server restarting cleanly in 1 second..."}
+
+
 @router.post("/reanalyze/{deck_id}")
 async def trigger_reanalysis(deck_id: str):
     """Trigger re-analysis of a specific deck."""
