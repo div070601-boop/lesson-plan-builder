@@ -77,8 +77,8 @@ class OneDriveService:
 
     @property
     def is_configured(self) -> bool:
-        """Check if OneDrive credentials are configured (client_id is set)."""
-        return bool(self.client_id)
+        """Check if OneDrive credentials are configured AND there is an active OAuth user session."""
+        return bool(self.client_id) and self.has_active_session
 
     @property
     def has_active_session(self) -> bool:
@@ -161,14 +161,17 @@ class OneDriveService:
         # Strategy 2: Try client credentials flow (app-only, no user login needed)
         if self.client_secret:
             logger.info("No cached user token. Trying client credentials flow...")
-            app_cc = self._get_msal_app()
-            result = app_cc.acquire_token_for_client(
-                scopes=["https://graph.microsoft.com/.default"]
-            )
-            if result and "access_token" in result:
-                logger.info("Token acquired via client credentials flow.")
-                return result["access_token"]
-            logger.error(f"Client credentials flow failed: {result.get('error_description') if result else 'no result'}")
+            try:
+                app_cc = self._get_msal_app()
+                result = app_cc.acquire_token_for_client(
+                    scopes=["https://graph.microsoft.com/.default"]
+                )
+                if result and "access_token" in result:
+                    logger.info("Token acquired via client credentials flow.")
+                    return result["access_token"]
+                logger.error(f"Client credentials flow failed: {result.get('error_description') if result else 'no result'}")
+            except Exception as e:
+                logger.warning(f"Client credentials flow could not be run: {e}")
 
         raise RuntimeError(
             "Could not acquire OneDrive access token. "
