@@ -33,6 +33,23 @@ async def _background_sync_files(files, share_url):
     await asyncio.gather(*[_dl(f) for f in files], return_exceptions=True)
     logger.info("Background sync completed!")
 
+async def _background_full_reindex(share_urls):
+    import logging, traceback
+    logger = logging.getLogger(__name__)
+    logger.info("Background full re-index started across all share URLs...")
+    try:
+        all_files = []
+        for share_url in share_urls:
+            files = await onedrive_service.crawl_shared_folder(
+                share_url, extensions=[".pptx", ".ppt", ".docx"]
+            )
+            all_files.extend(files)
+        logger.info(f"Background crawl finished. Found {len(all_files)} files across modules. Starting background download/sync...")
+        if all_files and share_urls:
+            await _background_sync_files(all_files, share_urls[0])
+    except Exception as e:
+        logger.error(f"Background re-index encountered error: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+
 @router.get("/auth/onedrive/login")
 async def onedrive_login(request: Request):
     """Initiate Microsoft Graph OAuth flow."""
@@ -72,40 +89,15 @@ async def trigger_reindex():
     """Trigger a re-index. Uses Graph API if configured, otherwise scans local library/ folder."""
     # Check if OneDrive Graph API is configured
     if onedrive_service.is_configured and settings.onedrive_share_urls:
-        try:
-            all_files = []
-            for share_url in settings.onedrive_share_urls:
-                files = await onedrive_service.crawl_shared_folder(
-                    share_url, extensions=[".pptx", ".ppt", ".docx"]
-                )
-                all_files.extend(files)
-
-            # Initiate background download task so reindex API returns instantly without timeout
-            if all_files and settings.onedrive_share_urls:
-                asyncio.create_task(_background_sync_files(all_files, settings.onedrive_share_urls[0]))
-
-            return {
-                "status": "ok",
-                "source": "onedrive",
-                "files_found": len(all_files),
-                "files_downloaded": 0,
-                "message": f"Discovered {len(all_files)} files across OneDrive repository. Background sync initiated.",
-                "files": [f.to_dict() for f in all_files],
-            }
-        except Exception as e:
-            import logging, traceback
-            logger = logging.getLogger(__name__)
-            logger.error(f"OneDrive crawl failed during reindex: {type(e).__name__}: {e}")
-            logger.error(traceback.format_exc())
-            # Graceful fallback: return local files with a warning message so UI doesn't break
-            local_files = local_library.list_all_files()
-            return {
-                "status": "ok",
-                "source": "local_fallback",
-                "message": f"Indexed local library ({len(local_files)} files). Note: OneDrive crawl encountered: {type(e).__name__}: {str(e)}",
-                "files_found": len(local_files),
-                "files": [f.to_dict() for f in local_files],
-            }
+        asyncio.create_task(_background_full_reindex(settings.onedrive_share_urls))
+        return {
+            "status": "ok",
+            "source": "onedrive",
+            "files_found": 0,
+            "files_downloaded": 0,
+            "message": "✅ OneDrive background re-indexing initiated! Crawling repository and syncing presentation decks...",
+            "files": [],
+        }
     else:
         # Scan local library/ folder
         local_files = local_library.list_all_files()
