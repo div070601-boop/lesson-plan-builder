@@ -26,6 +26,7 @@ function AdminContent() {
   const [isTestRunning, setIsTestRunning] = useState(false);
   const [isReindexing, setIsReindexing] = useState(false);
   const [reindexResult, setReindexResult] = useState<string | null>(null);
+  const [libraryCount, setLibraryCount] = useState<number | null>(null);
 
   // Check for OneDrive callback query params
   useEffect(() => {
@@ -41,9 +42,10 @@ function AdminContent() {
   useEffect(() => {
     async function fetchStatus() {
       try {
-        const [healthRes, providerRes] = await Promise.all([
+        const [healthRes, providerRes, statsRes] = await Promise.all([
           fetch(`${API_BASE}/api/health`),
           fetch(`${API_BASE}/api/admin/provider-status`),
+          fetch(`${API_BASE}/api/admin/stats`),
         ]);
 
         if (healthRes.ok) {
@@ -54,6 +56,11 @@ function AdminContent() {
           setProviderStatus(await providerRes.json());
         } else {
           setProviderStatus({ groq: 'offline', gemini: 'offline', cerebras: 'offline' });
+        }
+
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          setLibraryCount(statsData.total_decks ?? statsData.library?.total_files ?? 0);
         }
       } catch {
         setProviderStatus({ groq: 'offline', gemini: 'offline', cerebras: 'offline' });
@@ -91,10 +98,13 @@ function AdminContent() {
       const response = await fetch(`${API_BASE}/api/admin/reindex`, { method: 'POST' });
       if (response.ok) {
         const data = await response.json();
+        if (data.files_found !== undefined) {
+          setLibraryCount(data.files_found);
+        }
         if (data.source === 'onedrive') {
-          setReindexResult(`✅ OneDrive re-index complete! Found ${data.files_found} files, downloaded ${data.files_downloaded}.`);
+          setReindexResult(data.message || `✅ OneDrive re-index active! Currently ${data.files_found} files indexed.`);
         } else {
-          setReindexResult(`✅ Local library scanned. Found ${data.files_found} files. Connect OneDrive to sync remote files.`);
+          setReindexResult(data.message || `✅ Local library scanned. Found ${data.files_found} files. Connect OneDrive to sync remote files.`);
         }
       } else {
         const errData = await response.json().catch(() => null);
@@ -211,9 +221,16 @@ function AdminContent() {
           </div>
 
           <div className="glass-card-static" style={{ padding: 'var(--space-6)' }}>
-            <h4 style={{ marginBottom: 'var(--space-3)', color: 'var(--text-primary)' }}>Library Re-Index</h4>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
+              <h4 style={{ color: 'var(--text-primary)', margin: 0 }}>Library Re-Index</h4>
+              {libraryCount !== null && (
+                <span className="badge badge-success" style={{ fontSize: '12px', fontWeight: 600 }}>
+                  📦 {libraryCount} Decks Indexed
+                </span>
+              )}
+            </div>
             <p className="text-muted" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-4)' }}>
-              Trigger a re-index of the OneDrive deck repository.
+              Trigger a background re-index of the OneDrive deck repository into local library.
             </p>
             <button
               className="btn btn-secondary"

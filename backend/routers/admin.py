@@ -102,12 +102,14 @@ async def trigger_reindex():
     # Check if OneDrive Graph API is configured
     if onedrive_service.is_configured and settings.onedrive_share_urls:
         asyncio.create_task(_background_full_reindex(settings.onedrive_share_urls))
+        lib_status = local_library.get_status()
+        current_files = lib_status["total_files"]
         return {
             "status": "ok",
             "source": "onedrive",
-            "files_found": 0,
-            "files_downloaded": 0,
-            "message": "✅ OneDrive background re-indexing initiated! Crawling repository and syncing presentation decks...",
+            "files_found": current_files,
+            "files_downloaded": current_files,
+            "message": f"✅ OneDrive background re-indexing active! Currently {current_files} presentation decks indexed in library and syncing more...",
             "files": [],
         }
     else:
