@@ -78,6 +78,9 @@ class OneDriveService:
         self.tenant_id = settings.ms_graph_tenant_id or "consumers"
         self._access_token: Optional[str] = None
         self._token_expires: Optional[datetime] = None
+        self._cached_access_token: Optional[str] = None
+        self._cached_token_expires_at: float = 0.0
+        self._cached_has_session: Optional[bool] = None
 
     @property
     def is_configured(self) -> bool:
@@ -89,17 +92,22 @@ class OneDriveService:
         """Check if there's a cached OAuth user token (from 'Connect OneDrive')."""
         if not self.client_id:
             return False
+        if self._cached_has_session is not None:
+            return self._cached_has_session
         # Check Supabase first
         from services.database import supabase
         if supabase:
             try:
                 res = supabase.table("settings").select("value").eq("key", "onedrive_token_cache").execute()
                 if len(res.data) > 0 and res.data[0].get("value"):
+                    self._cached_has_session = True
                     return True
             except Exception:
                 pass
         # Fallback: check local file
-        return os.path.exists(".onedrive_token.json")
+        has_local = os.path.exists(".onedrive_token.json")
+        self._cached_has_session = has_local
+        return has_local
 
     def _get_msal_app(self, cache=None):
         import msal
@@ -137,6 +145,7 @@ class OneDriveService:
 
     def _save_cache_to_db(self, cache):
         if cache.has_state_changed:
+            self._cached_has_session = True
             from services.database import supabase
             if supabase:
                 supabase.table("settings").upsert({
@@ -146,8 +155,11 @@ class OneDriveService:
 
     async def _get_access_token(self) -> str:
         """Get an OAuth2 access token. Tries cached user token first, then client credentials flow."""
-        import logging
+        import logging, time
         logger = logging.getLogger(__name__)
+
+        if self._cached_access_token and time.time() < self._cached_token_expires_at:
+            return self._cached_access_token
 
         # Strategy 1: Try cached user token (from "Connect OneDrive" OAuth flow)
         cache = self._load_cache_from_db()
@@ -158,6 +170,8 @@ class OneDriveService:
             result = app.acquire_token_silent(["Files.Read.All", "Sites.Read.All"], account=accounts[0])
             if result and "access_token" in result:
                 self._save_cache_to_db(cache)
+                self._cached_access_token = result["access_token"]
+                self._cached_token_expires_at = time.time() + result.get("expires_in", 3600) - 60
                 logger.info("Token acquired via cached user session.")
                 return result["access_token"]
             logger.warning(f"Silent token acquisition failed: {result.get('error_description') if result else 'no result'}")
@@ -171,6 +185,8 @@ class OneDriveService:
                     scopes=["https://graph.microsoft.com/.default"]
                 )
                 if result and "access_token" in result:
+                    self._cached_access_token = result["access_token"]
+                    self._cached_token_expires_at = time.time() + result.get("expires_in", 3600) - 60
                     logger.info("Token acquired via client credentials flow.")
                     return result["access_token"]
                 logger.error(f"Client credentials flow failed: {result.get('error_description') if result else 'no result'}")
