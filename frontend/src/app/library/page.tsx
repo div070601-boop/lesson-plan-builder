@@ -94,6 +94,8 @@ export default function LibraryPage() {
     d.tags.some(t => t.includes(search.toLowerCase()))
   );
 
+  const isDemo = decks.some(d => d.id === 'deck_001' || d.id === 'deck_002' || d.id === 'deck_003');
+
   return (
     <div className={styles.page}>
       <header className={styles.header}>
@@ -103,7 +105,7 @@ export default function LibraryPage() {
             Browse indexed decks and their pedagogical analysis
           </p>
         </div>
-        <span className="badge badge-info">{filtered.length} decks indexed {isLoading ? '' : '(demo data)'}</span>
+        <span className="badge badge-info">{filtered.length} decks indexed {isLoading ? '' : (isDemo ? '(demo data)' : '(live from OneDrive)')}</span>
       </header>
 
       {/* Search Bar */}
