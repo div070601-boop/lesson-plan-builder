@@ -342,7 +342,7 @@ class OneDriveService:
             response = await c.get(
                 url,
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-                timeout=30,
+                timeout=12,
             )
             response.raise_for_status()
             return response
@@ -407,34 +407,43 @@ class OneDriveService:
         return save_path
 
     async def crawl_shared_folder(
-        self, share_url: str, extensions: list[str] | None = None
+        self, share_url: str, extensions: list[str] | None = None, on_file_found=None, max_depth: int = 15
     ) -> list[OneDriveItem]:
-        """Recursively crawl a shared folder concurrently and return all matching files."""
+        """Recursively crawl a shared folder concurrently and return all matching files up to max_depth."""
         all_files: list[OneDriveItem] = []
-        sem = asyncio.Semaphore(10)
+        sem = asyncio.Semaphore(12)
+        import logging
+        logger = logging.getLogger(__name__)
 
-        async def _crawl(items: list[OneDriveItem], client: httpx.AsyncClient):
+        async def _crawl(items: list[OneDriveItem], client: httpx.AsyncClient, depth: int = 0):
             folder_tasks = []
             for item in items:
-                if item.is_folder and item.item_id:
-                    folder_tasks.append(_process_subfolder(item.item_id, client))
+                if item.is_folder and item.item_id and depth < max_depth:
+                    folder_tasks.append(_process_subfolder(item.item_id, client, depth + 1))
                 elif not item.is_folder:
                     if extensions is None or any(item.name.lower().endswith(ext) for ext in extensions):
                         all_files.append(item)
+                        if on_file_found:
+                            try:
+                                res = on_file_found(item, share_url)
+                                if asyncio.iscoroutine(res):
+                                    asyncio.create_task(res)
+                            except Exception as ex:
+                                logger.warning(f"on_file_found callback error: {ex}")
             if folder_tasks:
                 await asyncio.gather(*folder_tasks, return_exceptions=True)
 
-        async def _process_subfolder(item_id: str, client: httpx.AsyncClient):
+        async def _process_subfolder(item_id: str, client: httpx.AsyncClient, depth: int):
             async with sem:
                 try:
                     sub_items = await self.list_subfolder(share_url, item_id, client=client)
-                    await _crawl(sub_items, client)
+                    await _crawl(sub_items, client, depth)
                 except Exception as e:
                     logger.warning(f"Error crawling subfolder {item_id}: {e}")
 
         async with httpx.AsyncClient(follow_redirects=True) as client:
             root_items = await self.list_shared_folder(share_url, client=client)
-            await _crawl(root_items, client)
+            await _crawl(root_items, client, 0)
         return all_files
 
 

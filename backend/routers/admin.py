@@ -38,15 +38,27 @@ async def _background_full_reindex(share_urls):
     logger = logging.getLogger(__name__)
     logger.info("Background full re-index started across all share URLs...")
     try:
+        dl_sem = asyncio.Semaphore(5)
+        async def _instant_dl(item, s_url):
+            if not item.item_id:
+                return
+            async with dl_sem:
+                try:
+                    save_path = f"./library/{item.name}"
+                    await onedrive_service.download_file(s_url, item.item_id, save_path)
+                    logger.info(f"Background downloaded file instantly: {item.name}")
+                except Exception as ex:
+                    logger.warning(f"Failed instant download for {item.name}: {ex}")
+
         all_files = []
         for share_url in share_urls:
             files = await onedrive_service.crawl_shared_folder(
-                share_url, extensions=[".pptx", ".ppt", ".docx"]
+                share_url,
+                extensions=[".pptx", ".ppt", ".docx"],
+                on_file_found=lambda item, s_url=share_url: _instant_dl(item, s_url)
             )
             all_files.extend(files)
-        logger.info(f"Background crawl finished. Found {len(all_files)} files across modules. Starting background download/sync...")
-        if all_files and share_urls:
-            await _background_sync_files(all_files, share_urls[0])
+        logger.info(f"Background crawl finished. Found {len(all_files)} files across modules.")
     except Exception as e:
         logger.error(f"Background re-index encountered error: {type(e).__name__}: {e}\n{traceback.format_exc()}")
 
@@ -120,7 +132,7 @@ async def debug_crawl():
         if not settings.onedrive_share_urls:
             return {"error": "No share URLs configured"}
         share_url = settings.onedrive_share_urls[0]
-        files = await onedrive_service.crawl_shared_folder(share_url, extensions=[".pptx", ".ppt", ".docx"])
+        files = await onedrive_service.crawl_shared_folder(share_url, extensions=[".pptx", ".ppt", ".docx"], max_depth=2)
         result["crawl_status"] = "ok"
         result["files_found"] = len(files)
         result["files"] = [f.to_dict() for f in files[:20]]
