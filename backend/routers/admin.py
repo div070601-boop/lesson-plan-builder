@@ -6,6 +6,7 @@ For indexer control, re-analysis triggers, provider diagnostics, and system stat
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
+import asyncio
 
 from services.providers import provider_service, ProviderError
 from services.onedrive import onedrive_service, local_library
@@ -13,6 +14,24 @@ from services.generation import _generations
 from config import settings
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+async def _background_sync_files(files, share_url):
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Background sync started for {len(files)} files...")
+    sem = asyncio.Semaphore(5)
+    async def _dl(f):
+        if not f.item_id:
+            return
+        async with sem:
+            try:
+                save_path = f"./library/{f.name}"
+                await onedrive_service.download_file(share_url, f.item_id, save_path)
+            except Exception as e:
+                logger.warning(f"Failed to background sync {f.name}: {e}")
+
+    await asyncio.gather(*[_dl(f) for f in files], return_exceptions=True)
+    logger.info("Background sync completed!")
 
 @router.get("/auth/onedrive/login")
 async def onedrive_login(request: Request):
@@ -61,21 +80,16 @@ async def trigger_reindex():
                 )
                 all_files.extend(files)
 
-            # Download files to local library
-            downloaded = 0
-            for f in all_files:
-                if f.item_id and f.download_url:
-                    save_path = f"./library/{f.name}"
-                    await onedrive_service.download_file(
-                        settings.onedrive_share_urls[0], f.item_id, save_path
-                    )
-                    downloaded += 1
+            # Initiate background download task so reindex API returns instantly without timeout
+            if all_files and settings.onedrive_share_urls:
+                asyncio.create_task(_background_sync_files(all_files, settings.onedrive_share_urls[0]))
 
             return {
                 "status": "ok",
                 "source": "onedrive",
                 "files_found": len(all_files),
-                "files_downloaded": downloaded,
+                "files_downloaded": 0,
+                "message": f"Discovered {len(all_files)} files across OneDrive repository. Background sync initiated.",
                 "files": [f.to_dict() for f in all_files],
             }
         except Exception as e:

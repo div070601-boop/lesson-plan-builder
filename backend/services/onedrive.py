@@ -269,7 +269,7 @@ class OneDriveService:
 
         return result
 
-    async def list_shared_folder(self, share_url: str) -> list[OneDriveItem]:
+    async def list_shared_folder(self, share_url: str, client: httpx.AsyncClient | None = None) -> list[OneDriveItem]:
         """List all items in a shared OneDrive folder."""
         if not self.is_configured:
             raise RuntimeError("OneDrive is not configured. Set MS_GRAPH_CLIENT_ID and MS_GRAPH_CLIENT_SECRET in .env")
@@ -277,13 +277,20 @@ class OneDriveService:
         token = await self._get_access_token()
         share_token = _encode_share_url(share_url)
 
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.get(
+        async def _do_req(c: httpx.AsyncClient):
+            response = await c.get(
                 f"{self.GRAPH_BASE}/shares/{share_token}/driveItem/children",
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
                 timeout=30,
             )
             response.raise_for_status()
+            return response
+
+        if client:
+            response = await _do_req(client)
+        else:
+            async with httpx.AsyncClient(follow_redirects=True) as c:
+                response = await _do_req(c)
 
         items = []
         for item_data in response.json().get("value", []):
@@ -299,7 +306,7 @@ class OneDriveService:
             ))
         return items
 
-    async def list_subfolder(self, share_url: str, item_id: str) -> list[OneDriveItem]:
+    async def list_subfolder(self, share_url: str, item_id: str, client: httpx.AsyncClient | None = None) -> list[OneDriveItem]:
         """List children of a subfolder within a shared folder."""
         if not self.is_configured:
             raise RuntimeError("OneDrive is not configured.")
@@ -311,13 +318,20 @@ class OneDriveService:
             else f"{self.GRAPH_BASE}/shares/{_encode_share_url(share_url)}/items/{item_id}/children"
         )
 
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.get(
+        async def _do_req(c: httpx.AsyncClient):
+            response = await c.get(
                 url,
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
                 timeout=30,
             )
             response.raise_for_status()
+            return response
+
+        if client:
+            response = await _do_req(client)
+        else:
+            async with httpx.AsyncClient(follow_redirects=True) as c:
+                response = await _do_req(c)
 
         items = []
         for item_data in response.json().get("value", []):
@@ -333,7 +347,7 @@ class OneDriveService:
             ))
         return items
 
-    async def download_file(self, share_url: str, item_id: str, save_path: str) -> str:
+    async def download_file(self, share_url: str, item_id: str, save_path: str, client: httpx.AsyncClient | None = None) -> str:
         """Download a file from a shared folder to a local path."""
         if not self.is_configured:
             raise RuntimeError("OneDrive is not configured.")
@@ -345,9 +359,8 @@ class OneDriveService:
             else f"{self.GRAPH_BASE}/shares/{_encode_share_url(share_url)}/items/{item_id}"
         )
 
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            # Get the download URL
-            response = await client.get(
+        async def _do_download(c: httpx.AsyncClient):
+            response = await c.get(
                 url,
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
                 timeout=30,
@@ -358,39 +371,50 @@ class OneDriveService:
             if not download_url:
                 raise RuntimeError(f"No download URL for item {item_id}")
 
-            # Download the file
-            file_response = await client.get(download_url, timeout=120)
+            file_response = await c.get(download_url, timeout=120)
             file_response.raise_for_status()
 
             Path(save_path).parent.mkdir(parents=True, exist_ok=True)
             with open(save_path, "wb") as f:
                 f.write(file_response.content)
 
-            return save_path
+        if client:
+            await _do_download(client)
+        else:
+            async with httpx.AsyncClient(follow_redirects=True) as c:
+                await _do_download(c)
+
+        return save_path
 
     async def crawl_shared_folder(
         self, share_url: str, extensions: list[str] | None = None
     ) -> list[OneDriveItem]:
-        """Recursively crawl a shared folder and return all matching files.
-        
-        Args:
-            share_url: The OneDrive share URL
-            extensions: File extensions to include (e.g., ['.pptx', '.docx']). None = all files.
-        """
+        """Recursively crawl a shared folder concurrently and return all matching files."""
         all_files: list[OneDriveItem] = []
-        
-        async def _crawl(items: list[OneDriveItem]):
+        sem = asyncio.Semaphore(10)
+
+        async def _crawl(items: list[OneDriveItem], client: httpx.AsyncClient):
+            folder_tasks = []
             for item in items:
-                if item.is_folder:
-                    if item.item_id:
-                        sub_items = await self.list_subfolder(share_url, item.item_id)
-                        await _crawl(sub_items)
-                else:
+                if item.is_folder and item.item_id:
+                    folder_tasks.append(_process_subfolder(item.item_id, client))
+                elif not item.is_folder:
                     if extensions is None or any(item.name.lower().endswith(ext) for ext in extensions):
                         all_files.append(item)
+            if folder_tasks:
+                await asyncio.gather(*folder_tasks, return_exceptions=True)
 
-        root_items = await self.list_shared_folder(share_url)
-        await _crawl(root_items)
+        async def _process_subfolder(item_id: str, client: httpx.AsyncClient):
+            async with sem:
+                try:
+                    sub_items = await self.list_subfolder(share_url, item_id, client=client)
+                    await _crawl(sub_items, client)
+                except Exception as e:
+                    logger.warning(f"Error crawling subfolder {item_id}: {e}")
+
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            root_items = await self.list_shared_folder(share_url, client=client)
+            await _crawl(root_items, client)
         return all_files
 
 
