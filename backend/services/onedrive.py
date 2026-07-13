@@ -305,11 +305,15 @@ class OneDriveService:
             raise RuntimeError("OneDrive is not configured.")
 
         token = await self._get_access_token()
-        share_token = _encode_share_url(share_url)
+        url = (
+            f"{self.GRAPH_BASE}/drives/{item_id.split('!')[0]}/items/{item_id}/children"
+            if "!" in item_id
+            else f"{self.GRAPH_BASE}/shares/{_encode_share_url(share_url)}/items/{item_id}/children"
+        )
 
         async with httpx.AsyncClient(follow_redirects=True) as client:
             response = await client.get(
-                f"{self.GRAPH_BASE}/shares/{share_token}/items/{item_id}/children",
+                url,
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
                 timeout=30,
             )
@@ -335,12 +339,16 @@ class OneDriveService:
             raise RuntimeError("OneDrive is not configured.")
 
         token = await self._get_access_token()
-        share_token = _encode_share_url(share_url)
+        url = (
+            f"{self.GRAPH_BASE}/drives/{item_id.split('!')[0]}/items/{item_id}"
+            if "!" in item_id
+            else f"{self.GRAPH_BASE}/shares/{_encode_share_url(share_url)}/items/{item_id}"
+        )
 
         async with httpx.AsyncClient(follow_redirects=True) as client:
             # Get the download URL
             response = await client.get(
-                f"{self.GRAPH_BASE}/shares/{share_token}/items/{item_id}",
+                url,
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
                 timeout=30,
             )
