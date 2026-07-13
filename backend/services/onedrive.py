@@ -77,6 +77,12 @@ class OneDriveService:
 
     @property
     def is_configured(self) -> bool:
+        """Check if OneDrive credentials are configured (client_id is set)."""
+        return bool(self.client_id)
+
+    @property
+    def has_active_session(self) -> bool:
+        """Check if there's a cached OAuth user token (from 'Connect OneDrive')."""
         if not self.client_id:
             return False
         # Check Supabase first
@@ -84,7 +90,7 @@ class OneDriveService:
         if supabase:
             try:
                 res = supabase.table("settings").select("value").eq("key", "onedrive_token_cache").execute()
-                if len(res.data) > 0:
+                if len(res.data) > 0 and res.data[0].get("value"):
                     return True
             except Exception:
                 pass
@@ -135,21 +141,40 @@ class OneDriveService:
                 }).execute()
 
     async def _get_access_token(self) -> str:
-        """Get an OAuth2 access token using MSAL and the cached token from Supabase."""
+        """Get an OAuth2 access token. Tries cached user token first, then client credentials flow."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Strategy 1: Try cached user token (from "Connect OneDrive" OAuth flow)
         cache = self._load_cache_from_db()
         app = self._get_msal_app(cache)
         
         accounts = app.get_accounts()
-        if not accounts:
-            raise RuntimeError("No accounts found in MSAL token cache.")
-            
-        result = app.acquire_token_silent(["Files.Read.All", "Sites.Read.All"], account=accounts[0])
-        
-        if not result or "access_token" not in result:
-            raise RuntimeError(f"Failed to acquire token silently: {result.get('error_description') if result else 'Unknown error'}")
-            
-        self._save_cache_to_db(cache)
-        return result["access_token"]
+        if accounts:
+            result = app.acquire_token_silent(["Files.Read.All", "Sites.Read.All"], account=accounts[0])
+            if result and "access_token" in result:
+                self._save_cache_to_db(cache)
+                logger.info("Token acquired via cached user session.")
+                return result["access_token"]
+            logger.warning(f"Silent token acquisition failed: {result.get('error_description') if result else 'no result'}")
+
+        # Strategy 2: Try client credentials flow (app-only, no user login needed)
+        if self.client_secret:
+            logger.info("No cached user token. Trying client credentials flow...")
+            app_cc = self._get_msal_app()
+            result = app_cc.acquire_token_for_client(
+                scopes=["https://graph.microsoft.com/.default"]
+            )
+            if result and "access_token" in result:
+                logger.info("Token acquired via client credentials flow.")
+                return result["access_token"]
+            logger.error(f"Client credentials flow failed: {result.get('error_description') if result else 'no result'}")
+
+        raise RuntimeError(
+            "Could not acquire OneDrive access token. "
+            "Either click 'Connect OneDrive' in the Admin Panel to authenticate, "
+            "or ensure your Azure app has Application permissions (Files.Read.All) for client credentials flow."
+        )
 
     def get_auth_url(self, redirect_uri: str) -> str:
         """Get the Microsoft login URL for OAuth web flow."""
