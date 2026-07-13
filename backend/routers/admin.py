@@ -108,13 +108,27 @@ async def trigger_reindex():
 async def debug_onedrive():
     """Debug endpoint: step-by-step check of OneDrive connectivity."""
     import traceback
+    from services.database import supabase
+
     result = {
         "client_id_set": bool(settings.ms_graph_client_id),
         "client_secret_set": bool(settings.ms_graph_client_secret),
         "is_configured": onedrive_service.is_configured,
+        "has_active_session": onedrive_service.has_active_session,
         "share_urls": settings.onedrive_share_urls,
         "share_urls_count": len(settings.onedrive_share_urls),
+        "supabase_connected": supabase is not None,
     }
+
+    # Check Supabase settings table
+    if supabase:
+        try:
+            res = supabase.table("settings").select("key").execute()
+            result["supabase_settings_keys"] = [r["key"] for r in res.data] if res.data else []
+            result["supabase_settings_table_ok"] = True
+        except Exception as e:
+            result["supabase_settings_table_ok"] = False
+            result["supabase_settings_error"] = f"{type(e).__name__}: {str(e)}"
 
     # Step 1: Try to acquire access token
     if onedrive_service.is_configured:
