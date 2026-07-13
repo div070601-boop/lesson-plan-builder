@@ -110,6 +110,37 @@ async def trigger_reindex():
         }
 
 
+@router.get("/debug-crawl")
+async def debug_crawl():
+    """Debug endpoint: run crawl_shared_folder and test download of the first presentation deck."""
+    import traceback
+    from pathlib import Path
+    result = {}
+    try:
+        if not settings.onedrive_share_urls:
+            return {"error": "No share URLs configured"}
+        share_url = settings.onedrive_share_urls[0]
+        files = await onedrive_service.crawl_shared_folder(share_url, extensions=[".pptx", ".ppt", ".docx"])
+        result["crawl_status"] = "ok"
+        result["files_found"] = len(files)
+        result["files"] = [f.to_dict() for f in files[:20]]
+        if files and files[0].item_id:
+            first_file = files[0]
+            save_path = f"./library/{first_file.name}"
+            result["test_download_start"] = save_path
+            dl_res = await onedrive_service.download_file(share_url, first_file.item_id, save_path)
+            result["test_download_path"] = dl_res
+            result["test_download_exists"] = Path(save_path).exists() if save_path else False
+            result["test_download_size"] = Path(save_path).stat().st_size if Path(save_path).exists() else 0
+            from services.onedrive import local_library
+            result["local_library_status"] = local_library.get_status()
+    except Exception as e:
+        result["crawl_status"] = "error"
+        result["error"] = f"{type(e).__name__}: {str(e)}"
+        result["traceback"] = traceback.format_exc()
+    return result
+
+
 @router.get("/debug-onedrive")
 async def debug_onedrive():
     """Debug endpoint: step-by-step check of OneDrive connectivity."""
