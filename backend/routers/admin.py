@@ -38,7 +38,7 @@ async def _background_full_reindex(share_urls):
     logger = logging.getLogger(__name__)
     logger.info("Background full re-index started across all share URLs...")
     try:
-        dl_sem = asyncio.Semaphore(5)
+        dl_sem = asyncio.Semaphore(2)
         async def _instant_dl(item, s_url):
             if not item.item_id:
                 return

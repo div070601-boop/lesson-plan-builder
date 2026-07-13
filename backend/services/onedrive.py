@@ -391,12 +391,18 @@ class OneDriveService:
             if not download_url:
                 raise RuntimeError(f"No download URL for item {item_id}")
 
-            file_response = await c.get(download_url, timeout=120)
-            file_response.raise_for_status()
-
             Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(save_path, "wb") as f:
-                f.write(file_response.content)
+            async with c.stream("GET", download_url, timeout=120) as file_response:
+                file_response.raise_for_status()
+                def _open_write():
+                    return open(save_path, "wb")
+                f = await asyncio.to_thread(_open_write)
+                try:
+                    async for chunk in file_response.aiter_bytes(chunk_size=65536):
+                        if chunk:
+                            await asyncio.to_thread(f.write, chunk)
+                finally:
+                    await asyncio.to_thread(f.close)
 
         if client:
             await _do_download(client)
