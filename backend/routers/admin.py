@@ -79,12 +79,16 @@ async def trigger_reindex():
                 "files": [f.to_dict() for f in all_files],
             }
         except Exception as e:
+            import logging, traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"OneDrive crawl failed during reindex: {type(e).__name__}: {e}")
+            logger.error(traceback.format_exc())
             # Graceful fallback: return local files with a warning message so UI doesn't break
             local_files = local_library.list_all_files()
             return {
                 "status": "ok",
                 "source": "local_fallback",
-                "message": f"Indexed local library ({len(local_files)} files). Note: OneDrive crawl encountered: {str(e)}",
+                "message": f"Indexed local library ({len(local_files)} files). Note: OneDrive crawl encountered: {type(e).__name__}: {str(e)}",
                 "files_found": len(local_files),
                 "files": [f.to_dict() for f in local_files],
             }
@@ -98,6 +102,45 @@ async def trigger_reindex():
             "files_found": len(local_files),
             "files": [f.to_dict() for f in local_files],
         }
+
+
+@router.get("/debug-onedrive")
+async def debug_onedrive():
+    """Debug endpoint: step-by-step check of OneDrive connectivity."""
+    import traceback
+    result = {
+        "client_id_set": bool(settings.ms_graph_client_id),
+        "client_secret_set": bool(settings.ms_graph_client_secret),
+        "is_configured": onedrive_service.is_configured,
+        "share_urls": settings.onedrive_share_urls,
+        "share_urls_count": len(settings.onedrive_share_urls),
+    }
+
+    # Step 1: Try to acquire access token
+    if onedrive_service.is_configured:
+        try:
+            token = await onedrive_service._get_access_token()
+            result["token_acquired"] = True
+            result["token_preview"] = token[:20] + "..." if token else None
+        except Exception as e:
+            result["token_acquired"] = False
+            result["token_error"] = f"{type(e).__name__}: {str(e)}"
+            result["token_traceback"] = traceback.format_exc()
+            return result
+
+        # Step 2: Try to list shared folder
+        if settings.onedrive_share_urls:
+            try:
+                items = await onedrive_service.list_shared_folder(settings.onedrive_share_urls[0])
+                result["list_shared_folder_ok"] = True
+                result["items_found"] = len(items)
+                result["items"] = [i.to_dict() for i in items[:10]]  # First 10 items
+            except Exception as e:
+                result["list_shared_folder_ok"] = False
+                result["list_error"] = f"{type(e).__name__}: {str(e)}"
+                result["list_traceback"] = traceback.format_exc()
+
+    return result
 
 
 @router.post("/reanalyze/{deck_id}")
