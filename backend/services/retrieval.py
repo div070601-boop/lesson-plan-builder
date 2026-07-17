@@ -5,12 +5,14 @@ Will connect to Supabase pgvector when the indexer is operational.
 
 from typing import Optional
 from models.deck import Deck
-from services.library import MOCK_DECKS
+from services.library import LibraryService
+
+_library_service = LibraryService()
 
 
 class RetrievalService:
     """Hybrid retrieval: semantic search + metadata filtering.
-    Currently returns mock results. Will use Supabase pgvector in production."""
+    Currently queries the live Supabase deck cache and applies filtering."""
 
     async def retrieve_matching_decks(
         self,
@@ -22,17 +24,15 @@ class RetrievalService:
         client_id: Optional[str] = None,
         top_k: int = 5,
     ) -> list[Deck]:
-        """Retrieve the most relevant decks for a given brief.
+        """Retrieve the most relevant decks for a given brief from Supabase cache.
 
-        In production, this will:
-        1. Embed the brief text using Gemini embeddings
-        2. Query Supabase pgvector for semantic similarity
-        3. Apply metadata filters (audience, domain, tone, industry)
-        4. Hard-filter by client_id for data isolation
-        5. Return top-k results with full analysis JSON
+        1. Load cached decks from Supabase (`_library_service._get_all_decks()`)
+        2. Apply metadata filters (audience, domain, tone, industry)
+        3. Hard-filter by client_id for data isolation
+        4. Return top-k results with full analysis JSON
         """
-        # For now, return all mock decks
-        results = MOCK_DECKS.copy()
+        # Get real indexed decks from Supabase cache
+        results = _library_service._get_all_decks()
 
         # Apply client isolation filter
         if client_id:
@@ -40,6 +40,12 @@ class RetrievalService:
                 d for d in results
                 if d.client_id == client_id or d.client_id == "acemac_internal"
             ]
+
+        # Apply domain filter if provided
+        if content_domain:
+            domain_filtered = [d for d in results if content_domain in d.topic_tags]
+            if domain_filtered:
+                results = domain_filtered
 
         return results[:top_k]
 
