@@ -29,12 +29,16 @@ class Deck(BaseModel):
     filename: str
     client_id: Optional[str] = None
     client_name: Optional[str] = None
+    module_name: Optional[str] = None  # Parent folder / module context
     topic_tags: list[str] = Field(default_factory=list)
     slide_count: int = 0
+    file_size: Optional[int] = None  # File size in bytes
+    slide_titles: list[str] = Field(default_factory=list)  # Extracted slide titles
     analysis: Optional[DeckAnalysis] = None
     summary: Optional[str] = None  # 150-200 word natural language summary
     master_template_ref: Optional[str] = None
     onedrive_path: Optional[str] = None
+    file_hash: Optional[str] = None  # MD5 of first 8KB for change detection
     indexed_at: Optional[datetime] = None
     analyzed_at: Optional[datetime] = None
     last_modified: Optional[datetime] = None

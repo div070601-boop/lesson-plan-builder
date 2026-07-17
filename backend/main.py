@@ -18,9 +18,19 @@ async def lifespan(app: FastAPI):
     # Create required directories
     Path(settings.temp_upload_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
+    Path(settings.library_path).mkdir(parents=True, exist_ok=True)
     print(f"[START] {settings.app_name} v{settings.app_version} starting...")
     print(f"   Debug mode: {settings.debug}")
     print(f"   CORS origins: {settings.cors_origins}")
+
+    # Load deck cache from Supabase for instant serving
+    try:
+        from services.library import load_cache_from_supabase
+        cached = load_cache_from_supabase()
+        print(f"   📦 Deck cache: {len(cached)} decks loaded from Supabase")
+    except Exception as e:
+        print(f"   ⚠️  Deck cache load failed: {e}")
+
     yield
     print("[STOP] Shutting down...")
 
