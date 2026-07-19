@@ -70,17 +70,21 @@ async def _background_full_reindex(share_urls):
         all_files = []
         for share_url in share_urls:
             try:
+                def _on_file(item, url):
+                    _index_progress["crawled"] += 1
+                
                 files = await onedrive_service.crawl_shared_folder(
                     share_url,
                     extensions=[".pptx", ".ppt", ".docx"],
+                    on_file_found=_on_file
                 )
                 all_files.extend(files)
-                _index_progress["crawled"] = len(all_files)
             except Exception as e:
                 logger.warning(f"Crawl error for {share_url}: {e}")
                 _index_progress["errors"].append(f"Crawl: {str(e)[:200]}")
 
         _index_progress["total_remote"] = len(all_files)
+        _index_progress["crawled"] = len(all_files)
         _index_progress["status"] = "downloading"
         logger.info(f"Crawl complete: {len(all_files)} files found across {len(share_urls)} share URLs")
 

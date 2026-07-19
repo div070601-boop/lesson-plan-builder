@@ -440,12 +440,14 @@ class OneDriveService:
                 await asyncio.gather(*folder_tasks, return_exceptions=True)
 
         async def _process_subfolder(item_id: str, client: httpx.AsyncClient, depth: int):
-            async with sem:
-                try:
+            try:
+                # Only hold the semaphore for the network request!
+                async with sem:
                     sub_items = await self.list_subfolder(share_url, item_id, client=client)
-                    await _crawl(sub_items, client, depth)
-                except Exception as e:
-                    logger.warning(f"Error crawling subfolder {item_id}: {e}")
+                # Release semaphore before recursively crawling to avoid deadlock
+                await _crawl(sub_items, client, depth)
+            except Exception as e:
+                logger.warning(f"Error crawling subfolder {item_id}: {e}")
 
         async with httpx.AsyncClient(follow_redirects=True) as client:
             root_items = await self.list_shared_folder(share_url, client=client)
